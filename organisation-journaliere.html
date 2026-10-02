@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Organisation journalière</title>
+<style>
+  :root {
+    --beige: #ede4d3;
+    --beige-deep: #d9cbb0;
+    --paper: #faf7f1;
+    --white: #ffffff;
+    --ink: #161616;
+    --muted: #7a7266;
+    --line: #d8cfbd;
+    --px: 1.6px; /* hauteur par minute */
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--beige); color: var(--ink);
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 20px 80px; }
+  header { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 24px; }
+  h1 {
+    margin: 0; font-family: Georgia, "Times New Roman", serif; font-weight: 400;
+    font-size: clamp(34px, 6vw, 56px); letter-spacing: -.02em;
+  }
+  .meta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 18px; }
+  .meta label { font-size: 11px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); }
+  input, textarea, select, button {
+    font: inherit; color: var(--ink);
+  }
+  input[type=date], input[type=text], input[type=time], textarea, select {
+    background: var(--white); border: 1px solid var(--line); border-radius: 0; padding: 8px 10px;
+  }
+  input:focus, textarea:focus, select:focus, button:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+  .spacer { flex: 1; }
+  button {
+    background: var(--white); border: 1px solid var(--ink); padding: 8px 14px; cursor: pointer;
+    font-size: 13px; letter-spacing: .04em;
+  }
+  button:hover { background: var(--ink); color: var(--white); }
+  button.primary { background: var(--ink); color: var(--white); }
+  button.primary:hover { background: #3a3a3a; }
+  button.ghost { border-color: var(--line); color: var(--muted); }
+  button.ghost:hover { border-color: var(--ink); background: var(--white); color: var(--ink); }
+  .hint { font-size: 12px; color: var(--muted); margin: 0 0 14px; }
+
+  .board {
+    position: relative; background: var(--paper); border: 1px solid var(--ink);
+    height: calc(720 * var(--px) + 1px); display: flex; user-select: none; touch-action: pan-y;
+  }
+  .hours { width: 64px; flex: none; position: relative; border-right: 1px solid var(--ink); }
+  .hours span {
+    position: absolute; right: 10px; transform: translateY(-50%); font-size: 12px;
+    font-variant-numeric: tabular-nums; color: var(--muted);
+  }
+  .hours span:first-child { transform: none; }
+  .hours span:last-child { transform: translateY(-100%); }
+  .track { position: relative; flex: 1; cursor: crosshair; }
+  .line { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dotted var(--line); pointer-events: none; }
+  .line.h { border-top: 1px solid var(--line); }
+
+  .block {
+    position: absolute; padding: 6px 10px 14px; overflow: hidden; cursor: grab;
+    border: 1px solid var(--ink); font-size: 13px; line-height: 1.3;
+  }
+  .block.dragging { cursor: grabbing; box-shadow: 0 8px 22px rgba(0,0,0,.18); z-index: 5; }
+  .block .t { font-weight: 600; }
+  .block .h { font-size: 11px; opacity: .7; font-variant-numeric: tabular-nums; }
+  .block .p { font-size: 11px; opacity: .8; margin-top: 2px; }
+  .block[data-tone="blanc"] { background: var(--white); color: var(--ink); }
+  .block[data-tone="beige"] { background: var(--beige-deep); color: var(--ink); }
+  .block[data-tone="noir"]  { background: var(--ink); color: var(--white); }
+  .grip {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 10px; cursor: ns-resize;
+  }
+  .grip::after {
+    content: ""; position: absolute; left: 50%; bottom: 4px; width: 22px; height: 2px;
+    margin-left: -11px; background: currentColor; opacity: .35;
+  }
+
+  dialog {
+    border: 1px solid var(--ink); border-radius: 0; padding: 0; background: var(--paper); color: var(--ink);
+    width: min(420px, calc(100vw - 32px));
+  }
+  dialog::backdrop { background: rgba(22,22,22,.45); }
+  form { padding: 22px; display: grid; gap: 14px; }
+  form h2 { margin: 0; font-family: Georgia, serif; font-weight: 400; font-size: 24px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .field { display: grid; gap: 5px; }
+  .field label { font-size: 11px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); }
+  .field input, .field textarea, .field select { width: 100%; }
+  .actions { display: flex; gap: 8px; margin-top: 4px; }
+
+  @media print {
+    body { background: #fff; }
+    .no-print { display: none !important; }
+    .wrap { padding: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Organisation journalière</h1>
+    <div class="meta no-print">
+      <label for="date">Date</label>
+      <input type="date" id="date">
+      <label for="note">Projet / Lieu</label>
+      <input type="text" id="note" placeholder="…" size="22">
+      <div class="spacer"></div>
+      <button class="primary" id="add">+ Ajouter un bloc</button>
+      <button id="print">Imprimer</button>
+      <button class="ghost" id="clear">Tout effacer</button>
+    </div>
+  </header>
+
+  <p class="hint no-print">Double-clic sur la grille pour créer un bloc · glisse pour déplacer · tire le bas pour ajuster la durée · clic pour modifier. Tout est enregistré automatiquement.</p>
+
+  <div class="board" id="board">
+    <div class="hours" id="hours"></div>
+    <div class="track" id="track"></div>
+  </div>
+</div>
+
+<dialog id="dlg">
+  <form method="dialog" id="form">
+    <h2>Bloc</h2>
+    <div class="field"><label for="f-title">Titre</label><input type="text" id="f-title" placeholder="Ex. Plan 12 – intérieur"></div>
+    <div class="row">
+      <div class="field"><label for="f-start">Début</label><input type="time" id="f-start" step="900"></div>
+      <div class="field"><label for="f-end">Fin</label><input type="time" id="f-end" step="900"></div>
+    </div>
+    <div class="field"><label for="f-place">Lieu / Équipe</label><input type="text" id="f-place"></div>
+    <div class="field"><label for="f-note">Notes</label><textarea id="f-note" rows="3"></textarea></div>
+    <div class="field"><label for="f-tone">Teinte</label>
+      <select id="f-tone"><option value="beige">Beige</option><option value="blanc">Blanc</option><option value="noir">Noir</option></select>
+    </div>
+    <div class="actions">
+      <button class="primary" value="save" id="save">Enregistrer</button>
+      <button value="cancel" class="ghost">Annuler</button>
+      <div class="spacer"></div>
+      <button type="button" id="del" class="ghost">Supprimer</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+(() => {
+  const DAY_START = 8 * 60, DAY_END = 20 * 60, SNAP = 15, MIN_LEN = 15;
+  const KEY = "organisation-journaliere-v1";
+  const $ = id => document.getElementById(id);
+  const board = $("board"), track = $("track"), hoursEl = $("hours"), dlg = $("dlg");
+
+  let state;
+  try { state = JSON.parse(localStorage.getItem(KEY)); } catch (e) {}
+  if (!state || !Array.isArray(state.blocks)) {
+    state = { date: new Date().toISOString().slice(0, 10), note: "", blocks: [] };
+  }
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} };
+
+  const pxPerMin = () => track.clientHeight / (DAY_END - DAY_START);
+  const fmt = m => String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0");
+  const parse = s => { const [h, m] = s.split(":").map(Number); return h * 60 + m; };
+  const snap = m => Math.round(m / SNAP) * SNAP;
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const uid = () => Math.random().toString(36).slice(2, 9);
+
+  // Échelle des heures et lignes
+  for (let h = 8; h <= 20; h++) {
+    const top = (h - 8) / 12 * 100;
+    const s = document.createElement("span");
+    s.textContent = h + "h"; s.style.top = top + "%"; hoursEl.appendChild(s);
+    const l = document.createElement("div");
+    l.className = "line h"; l.style.top = top + "%"; track.appendChild(l);
+    if (h < 20) {
+      const half = document.createElement("div");
+      half.className = "line"; half.style.top = (top + 50 / 12) + "%"; track.appendChild(half);
+    }
+  }
+
+  // Colonnes pour blocs qui se chevauchent
+  function layout(blocks) {
+    const sorted = [...blocks].sort((a, b) => a.start - b.start || a.end - b.end);
+    const out = new Map(); let cluster = [], clusterEnd = -1;
+    const flush = () => {
+      const cols = [];
+      cluster.forEach(b => {
+        let c = cols.findIndex(end => end <= b.start);
+        if (c < 0) { c = cols.length; cols.push(0); }
+        cols[c] = b.end; out.set(b.id, { col: c });
+      });
+      cluster.forEach(b => out.get(b.id).n = cols.length);
+    };
+    sorted.forEach(b => {
+      if (b.start >= clusterEnd && cluster.length) { flush(); cluster = []; clusterEnd = -1; }
+      cluster.push(b); clusterEnd = Math.max(clusterEnd, b.end);
+    });
+    if (cluster.length) flush();
+    return out;
+  }
+
+  function render() {
+    track.querySelectorAll(".block").forEach(n => n.remove());
+    const pos = layout(state.blocks);
+    state.blocks.forEach(b => {
+      const el = document.createElement("div");
+      el.className = "block"; el.dataset.id = b.id; el.dataset.tone = b.tone || "beige";
+      const { col, n } = pos.get(b.id);
+      el.style.top = (b.start - DAY_START) / (DAY_END - DAY_START) * 100 + "%";
+      el.style.height = (b.end - b.start) / (DAY_END - DAY_START) * 100 + "%";
+      el.style.left = `calc(${col / n * 100}% + 3px)`;
+      el.style.width = `calc(${100 / n}% - 6px)`;
+      el.innerHTML = `<div class="t"></div><div class="h">${fmt(b.start)} – ${fmt(b.end)}</div><div class="p"></div><div class="grip"></div>`;
+      el.querySelector(".t").textContent = b.title || "Sans titre";
+      el.querySelector(".p").textContent = b.place || "";
+      track.appendChild(el);
+    });
+    save();
+  }
+
+  // Création
+  function create(start, len = 60) {
+    start = clamp(snap(start), DAY_START, DAY_END - MIN_LEN);
+    const b = { id: uid(), title: "", place: "", note: "", tone: "beige", start, end: Math.min(DAY_END, start + len) };
+    state.blocks.push(b); render(); edit(b.id, true);
+  }
+  track.addEventListener("dblclick", e => {
+    if (e.target !== track && !e.target.classList.contains("line")) return;
+    const y = e.clientY - track.getBoundingClientRect().top;
+    create(DAY_START + y / pxPerMin() - 30);
+  });
+  $("add").onclick = () => create(9 * 60);
+
+  // Glisser / redimensionner
+  let drag = null;
+  track.addEventListener("pointerdown", e => {
+    const el = e.target.closest(".block"); if (!el) return;
+    const b = state.blocks.find(x => x.id === el.dataset.id);
+    drag = {
+      b, el, mode: e.target.classList.contains("grip") ? "resize" : "move",
+      y0: e.clientY, s0: b.start, e0: b.end, moved: false
+    };
+    el.setPointerCapture(e.pointerId); e.preventDefault();
+  });
+  track.addEventListener("pointermove", e => {
+    if (!drag) return;
+    const dy = e.clientY - drag.y0;
+    if (Math.abs(dy) > 4) { drag.moved = true; drag.el.classList.add("dragging"); }
+    if (!drag.moved) return;
+    const dm = snap(dy / pxPerMin()), b = drag.b;
+    if (drag.mode === "move") {
+      const len = drag.e0 - drag.s0;
+      b.start = clamp(drag.s0 + dm, DAY_START, DAY_END - len); b.end = b.start + len;
+    } else {
+      b.end = clamp(drag.e0 + dm, drag.s0 + MIN_LEN, DAY_END);
+    }
+    const el = drag.el;
+    el.style.top = (b.start - DAY_START) / (DAY_END - DAY_START) * 100 + "%";
+    el.style.height = (b.end - b.start) / (DAY_END - DAY_START) * 100 + "%";
+    el.querySelector(".h").textContent = `${fmt(b.start)} – ${fmt(b.end)}`;
+  });
+  const endDrag = () => {
+    if (!drag) return;
+    const { b, moved } = drag; drag = null;
+    if (moved) render(); else edit(b.id);
+  };
+  track.addEventListener("pointerup", endDrag);
+  track.addEventListener("pointercancel", endDrag);
+
+  // Édition
+  let editing = null, isNew = false;
+  function edit(id, fresh) {
+    const b = state.blocks.find(x => x.id === id); if (!b) return;
+    editing = b; isNew = !!fresh;
+    $("f-title").value = b.title; $("f-place").value = b.place; $("f-note").value = b.note;
+    $("f-start").value = fmt(b.start); $("f-end").value = fmt(b.end); $("f-tone").value = b.tone || "beige";
+    dlg.showModal(); $("f-title").focus();
+  }
+  $("form").addEventListener("submit", e => {
+    const action = e.submitter && e.submitter.value;
+    if (action === "save" && editing) {
+      let s = parse($("f-start").value || fmt(editing.start)), en = parse($("f-end").value || fmt(editing.end));
+      s = clamp(s, DAY_START, DAY_END - MIN_LEN);
+      en = clamp(en, s + MIN_LEN, DAY_END);
+      Object.assign(editing, {
+        title: $("f-title").value.trim(), place: $("f-place").value.trim(),
+        note: $("f-note").value, tone: $("f-tone").value, start: s, end: en
+      });
+    } else if (isNew && editing) {
+      state.blocks = state.blocks.filter(x => x !== editing);
+    }
+    editing = null; render();
+  });
+  $("del").onclick = () => {
+    state.blocks = state.blocks.filter(x => x !== editing);
+    editing = null; dlg.close(); render();
+  };
+  dlg.addEventListener("cancel", () => {
+    if (isNew && editing) { state.blocks = state.blocks.filter(x => x !== editing); editing = null; render(); }
+  });
+
+  // Entête
+  $("date").value = state.date; $("note").value = state.note || "";
+  $("date").onchange = e => { state.date = e.target.value; save(); };
+  $("note").oninput = e => { state.note = e.target.value; save(); };
+  $("print").onclick = () => window.print();
+  $("clear").onclick = () => {
+    if (state.blocks.length && confirm("Effacer tous les blocs de la journée ?")) { state.blocks = []; render(); }
+  };
+  window.addEventListener("resize", render);
+  render();
+})();
+</script>
+</body>
+</html>
