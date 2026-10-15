@@ -71,3 +71,8 @@ test/     api.test.js
 ```
 
 Les autres fichiers du dépôt (planning de tournage, organisation journalière, classeur de production) sont des documents de travail indépendants de la plateforme.
+
+## Vidéo de démonstration
+
+`demo/demo-agence.mp4` montre un parcours complet (profil, projet, tâches, documents, planning, passation B → C).
+Pour la regénérer après une modification de l'interface : `node demo/make-demo.js` (nécessite Playwright et ffmpeg).
