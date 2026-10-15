@@ -1,0 +1,12 @@
+{
+  "name": "l-agence",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Plateforme de production et de coordination de projets — L'agence (Ynov Audiovisuel)",
+  "main": "server/index.js",
+  "engines": { "node": ">=22.5" },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server/index.js",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js"
+  }
+}
