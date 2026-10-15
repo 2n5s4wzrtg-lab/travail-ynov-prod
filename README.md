@@ -74,5 +74,16 @@ Les autres fichiers du dépôt (planning de tournage, organisation journalière,
 
 ## Vidéo de démonstration
 
-`demo/demo-agence.mp4` montre un parcours complet (profil, projet, tâches, documents, planning, passation B → C).
-Pour la regénérer après une modification de l'interface : `node demo/make-demo.js` (nécessite Playwright et ffmpeg).
+`demo/demo-agence.mp4` montre un parcours complet (profil, projet, tâches, documents, planning, passation B → C), avec sous-titres, voix off française et musique.
+
+Pour la regénérer après une modification de l'interface (Playwright, ffmpeg, Python 3 + numpy requis) :
+
+```bash
+node demo/make-demo.js    # version sous-titrée, sans son
+# avec voix off : installer piper-tts (pip) et un modèle français, puis
+VOICE_PY=/chemin/venv/bin/python VOICE_MODEL=/chemin/fr_FR-siwis-medium.onnx node demo/make-demo.js
+```
+
+Les textes de la voix off sont dans `demo/make-demo.js` (objet `NARR`). La musique est générée par `demo/music.py` (composition originale, libre de droits).
+
+**Crédits :** voix synthétisée avec [Piper](https://github.com/rhasspy/piper), modèle `fr_FR-siwis-medium` entraîné sur la base SIWIS (Université d'Édimbourg, licence CC-BY 4.0).
