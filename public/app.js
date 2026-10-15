@@ -188,6 +188,8 @@ function renderShell(active) {
   clear(root);
   const nav = [['accueil', 'Tableau de bord', '#/'], ['projets', 'Projets', '#/projets'], ['planning', 'Planning', '#/planning'], ['equipe', 'Équipe', '#/equipe']];
   const week = S.config.currentWeek;
+  const adminLink = h('a', { class: 'icon-btn', href: '#/admin', title: 'Administration' }, 'Admin');
+  if (S.user.role === 'admin') api('GET', '/api/admin/pending-count').then((r) => { if (r.count) adminLink.append(h('span', { class: 'badge c', style: { marginLeft: '6px' }, title: 'Demandes en attente' }, r.count)); }).catch(() => {});
   const el = h('div', {},
     h('header', { class: 'topbar' }, h('div', { class: 'topbar-in' },
       logo(),
@@ -195,7 +197,7 @@ function renderShell(active) {
       h('div', { class: 'flex right' },
         h('span', { class: `badge week ${week.toLowerCase()}`, title: 'Semaine en cours' }, `Semaine ${week} en cours`),
         h('a', { href: '#/profil', style: { textDecoration: 'none' }, title: 'Mon profil' }, h('span', { class: 'who' }, avatar(S.user.name, S.user.color), h('span', { class: 'hide-sm' }, S.user.name.split(' ')[0]))),
-        S.user.role === 'admin' ? h('a', { class: 'icon-btn', href: '#/admin', title: 'Administration' }, 'Admin') : null,
+        S.user.role === 'admin' ? adminLink : null,
         h('button', { class: 'icon-btn', onclick: logout }, 'Déconnexion')))),
     h('main', { class: 'main', id: 'content' }));
   root.append(el);
@@ -209,6 +211,12 @@ function renderAuth() {
   let mode = S.config.firstUser ? 'register' : 'login';
   const box = h('div', { class: 'auth-box' });
   root.append(h('div', { class: 'auth' }, box));
+  const showPending = (mail) => {
+    clear(box).append(logo(true),
+      h('h2', { style: { margin: '26px 0 12px' } }, 'Demande envoyée ✅'),
+      h('p', { class: 'tag', style: { margin: '0 0 22px' } }, `Ton profil (${mail}) doit être validé par un administrateur de l'agence avant que tu puisses entrer. Reviens te connecter un peu plus tard : tant que ce n'est pas fait, l'accès reste fermé.`),
+      h('button', { class: 'btn primary', style: { width: '100%', padding: '13px' }, onclick: () => { mode = 'login'; draw(); } }, 'Retour à la connexion'));
+  };
   const draw = () => {
     const err = h('div', { class: 'error', role: 'alert' });
     const reg = mode === 'register';
@@ -219,13 +227,15 @@ function renderAuth() {
       password: h('input', { type: 'password', name: 'password', autocomplete: reg ? 'new-password' : 'current-password', required: true }),
       invite: h('input', { type: 'text', name: 'invite', autocomplete: 'off' }),
     };
-    const btn = h('button', { class: 'btn primary', type: 'submit', style: { width: '100%', padding: '13px' } }, reg ? 'Créer mon profil' : 'Se connecter');
+    const btn = h('button', { class: 'btn primary', type: 'submit', style: { width: '100%', padding: '13px' } }, reg ? (S.config.firstUser ? 'Créer mon profil' : 'Demander à rejoindre l\'agence') : 'Se connecter');
     const form = h('form', { class: 'stack', onsubmit: async (e) => {
       e.preventDefault(); err.textContent = ''; btn.disabled = true;
       try {
         const body = { email: f.email.value, password: f.password.value };
         if (reg) Object.assign(body, { name: f.name.value, job: f.job.value, invite: f.invite.value, week_group: form.week_group.value });
-        S.user = (await api('POST', reg ? '/api/auth/register' : '/api/auth/login', body)).user;
+        const r = await api('POST', reg ? '/api/auth/register' : '/api/auth/login', body);
+        if (r.pending) return showPending(f.email.value);
+        S.user = r.user;
         S.config = await api('GET', '/api/config');
         await loadUsers();
         location.hash = '#/'; route();
@@ -244,7 +254,7 @@ function renderAuth() {
     h('p', { class: 'muted small', style: { textAlign: 'center' } }, reg ? 'Déjà un profil ? ' : 'Pas encore de profil ? ',
       h('a', { href: '#', onclick: (e) => { e.preventDefault(); mode = reg ? 'login' : 'register'; draw(); } }, reg ? 'Se connecter' : 'Créer mon profil')));
     clear(box).append(logo(true),
-      h('p', { class: 'tag' }, S.config.firstUser ? 'Bienvenue ! Le premier profil créé devient administrateur de la plateforme.' : 'Production & coordination de projets — semaines B et C réunies.'),
+      h('p', { class: 'tag' }, S.config.firstUser ? 'Bienvenue ! Le premier profil créé devient administrateur de la plateforme.' : (reg ? 'Ton profil sera examiné par un administrateur de l\'agence avant d\'être activé.' : 'Production & coordination de projets — semaines B et C réunies.')),
       form);
     f[reg ? 'name' : 'email'].focus();
   };
@@ -259,6 +269,10 @@ async function viewDashboard(c) {
   clear(c).append(
     h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, `Salut ${S.user.name.split(' ')[0]} 👋`),
       h('p', { class: 'sub' }, fmtDate(d.today, { weekday: 'long', day: 'numeric', month: 'long' })))),
+    d.pendingCount ? h('a', { class: 'week-banner', href: '#/admin', style: { textDecoration: 'none', borderColor: 'var(--yellow)' } },
+      h('div', { class: 'letter', style: { background: 'var(--yellow)' } }, d.pendingCount),
+      h('div', { class: 'grow' }, h('b', {}, d.pendingCount > 1 ? `${d.pendingCount} personnes demandent à rejoindre l'agence` : '1 personne demande à rejoindre l\'agence'),
+        h('p', { class: 'muted small' }, 'Accepte ou refuse les demandes depuis l\'administration.')), h('span', { class: 'btn small' }, 'Traiter →')) : null,
     h('div', { class: 'week-banner' },
       h('div', { class: `letter ${d.currentWeek}` }, d.currentWeek),
       h('div', { class: 'grow' }, h('b', {}, `On est en semaine ${d.currentWeek}`),
@@ -644,18 +658,33 @@ async function viewAdmin(c) {
   await loadUsers();
   const cfg = await api('GET', '/api/config');
   S.config = cfg;
+  const everyone = (await api('GET', '/api/admin/users')).users;
+  const pending = everyone.filter((u) => u.status === 'pending');
+  const members = everyone.filter((u) => u.status !== 'pending');
+  const decide = (u, verb, msg) => async () => { if (await act(() => api('POST', `/api/users/${u.id}/${verb}`), msg)) route(); };
   clear(c).append(h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, 'Administration'), h('p', { class: 'sub' }, 'Membres, calendrier B/C et sauvegarde.'))),
+    h('section', { class: 'card', style: { marginBottom: '18px', borderColor: pending.length ? 'var(--yellow)' : '' } }, h('h2', {}, `Demandes d'adhésion${pending.length ? ` (${pending.length})` : ''}`),
+      pending.length ? h('div', { class: 'list' }, pending.map((u) => h('div', { class: 'item', style: { alignItems: 'center', flexWrap: 'wrap' } },
+        avatar(u.name, u.color, 'lg'),
+        h('div', { class: 'grow' }, h('b', {}, u.name), h('div', { class: 'small muted' }, `${u.email}${u.job ? ' · ' + u.job : ''}`),
+          h('div', { class: 'flex wrap', style: { marginTop: '6px' } }, weekBadge(u.week_group), h('span', { class: 'due' }, 'demande ' + ago(u.created_at)))),
+        h('div', { class: 'flex' },
+          h('button', { class: 'btn primary', onclick: decide(u, 'approve', `${u.name} a rejoint l'agence`) }, '✓ Accepter'),
+          h('button', { class: 'btn danger', onclick: () => confirmDo(`Refuser la demande de ${u.name} (${u.email}) ?`, decide(u, 'reject', 'Demande refusée')) }, '✕ Refuser')))))
+        : h('p', { class: 'empty' }, 'Aucune demande en attente. Les nouvelles inscriptions apparaîtront ici : personne ne peut entrer sans ton accord.')),
     h('section', { class: 'card', style: { marginBottom: '18px' } }, h('h2', {}, 'Calendrier des semaines'),
       h('p', { class: 'muted', style: { marginBottom: '14px' } }, `Cette semaine (n°${isoWeek(dayDate(cfg.today))}) est la semaine ${cfg.currentWeek}. Les semaines alternent B / C. Si c'est inversé par rapport à votre emploi du temps, inversez-les :`),
       h('button', { class: 'btn', onclick: async () => { if (await act(() => api('PUT', '/api/settings', { week_b_parity: cfg.weekBParity ? 0 : 1 }), 'Semaines inversées')) { S.config = await api('GET', '/api/config'); route(); } } }, '⇄ Inverser B et C')),
     h('section', { class: 'card', style: { marginBottom: '18px' } }, h('h2', {}, 'Membres'),
       h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl' }, h('thead', {}, h('tr', {}, ['Membre', 'Semaine', 'Rôle', ''].map((x) => h('th', {}, x)))),
-        h('tbody', {}, S.users.map((u) => h('tr', {},
-          h('td', {}, h('div', { class: 'flex' }, avatar(u.name, u.color), h('div', {}, h('b', {}, u.name), h('div', { class: 'small muted' }, u.email)))),
+        h('tbody', {}, members.map((u) => h('tr', {},
+          h('td', {}, h('div', { class: 'flex' }, avatar(u.name, u.color), h('div', {}, h('b', {}, u.name), u.status === 'rejected' ? h('span', { class: 'badge', style: { marginLeft: '8px', color: 'var(--pink)' } }, 'Accès refusé') : null, h('div', { class: 'small muted' }, u.email)))),
           h('td', {}, h('select', { 'aria-label': 'Semaine', style: { width: '120px' }, onchange: async (e) => { await act(() => api('PATCH', `/api/users/${u.id}`, { week_group: e.target.value }), 'Mis à jour'); } }, h('option', { value: 'B', selected: u.week_group === 'B' }, 'B'), h('option', { value: 'C', selected: u.week_group === 'C' }, 'C'))),
           h('td', {}, h('select', { 'aria-label': 'Rôle', style: { width: '140px' }, onchange: async (e) => { if (!(await act(() => api('PATCH', `/api/users/${u.id}`, { role: e.target.value }), 'Rôle mis à jour'))) route(); } }, h('option', { value: 'member', selected: u.role === 'member' }, 'Membre'), h('option', { value: 'admin', selected: u.role === 'admin' }, 'Admin'))),
           h('td', {}, h('div', { class: 'flex' },
             h('button', { class: 'btn small', onclick: () => formModal(`Nouveau mot de passe — ${u.name}`, [{ name: 'password', label: 'Mot de passe (8 caractères min.)', type: 'password' }], {}, async (d) => { await api('POST', `/api/users/${u.id}/password`, d); toast('Mot de passe réinitialisé'); }, { submitLabel: 'Réinitialiser' }) }, 'Mot de passe'),
+            u.status === 'rejected' ? h('button', { class: 'btn small', onclick: decide(u, 'approve', 'Accès rétabli') }, 'Rétablir') : null,
+            u.status === 'approved' && u.role !== 'admin' ? h('button', { class: 'btn small danger', title: 'Ferme l\'accès sans supprimer ses contributions', onclick: () => confirmDo(`Retirer l'accès de ${u.name} ? Il sera déconnecté. Ses contributions restent.`, decide(u, 'reject', 'Accès retiré')) }, 'Retirer l\'accès') : null,
             u.id !== S.user.id ? h('button', { class: 'btn small danger', onclick: () => confirmDo(`Supprimer le compte de ${u.name} ? Ses contributions restent, signées « Ancien membre ».`, async () => { await act(() => api('DELETE', `/api/users/${u.id}`), 'Compte supprimé'); route(); }) }, 'Supprimer') : null)))))))),
     h('section', { class: 'card' }, h('h2', {}, 'Sauvegarde'),
       h('p', { class: 'muted', style: { marginBottom: '14px' } }, 'Exporte toutes les données (projets, tâches, notes, planning, journal) en JSON. Les fichiers déposés sont dans le dossier data/uploads du serveur.'),

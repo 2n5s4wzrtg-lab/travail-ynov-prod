@@ -34,6 +34,10 @@ const NARR = {
   n11: "La note est automatiquement signée, avec son nom et sa semaine. Elle reste attachée au projet.",
   n12: "La semaine suivante, c'est au tour de Léo, du groupe C, de prendre le relais.",
   n13: "Il crée son profil, en semaine C.",
+  n13b: "Sa demande est envoyée, mais l'accès reste fermé tant qu'un administrateur ne l'a pas validée.",
+  n13c: "Si Léo essaie d'entrer maintenant, la plateforme refuse. C'est ce qui empêche des personnes extérieures à l'agence de la rejoindre.",
+  n13d: "Camille, administratrice, voit la demande en attente sur son tableau de bord.",
+  n13e: "Elle peut accepter ou refuser chaque demande. Ici, elle accepte Léo, qui peut maintenant se connecter.",
   n14: "Dès sa connexion, Léo voit sur son tableau de bord la passation laissée par la semaine B. Plus besoin de messages éparpillés : tout est au même endroit, avec l'auteur et la date.",
   n15: "Il s'attribue la tâche bloquée, et la passe en cours.",
   n16: "Il fait aussi avancer la réservation du matériel. Chaque carte indique qui l'a modifiée en dernier, et quand.",
@@ -243,7 +247,35 @@ const OVERLAY_CSS = `
   await type('input[name=email]', 'leo@ynov.com');
   await type('input[name=password]', 'motdepasse2', 30);
   await click('.seg label >> text=Semaine C');
-  await click('button:has-text("Créer mon profil")');
+  await click('.auth-box button[type=submit]');
+  await page.waitForSelector('text=Demande envoyée');
+  await cap('Sa demande est envoyée… mais l\'accès reste <b>fermé</b> tant qu\'un administrateur ne l\'a pas validée.', 3000, 'n13b');
+  await click('text=Retour à la connexion');
+  await type('input[name=email]', 'leo@ynov.com');
+  await type('input[name=password]', 'motdepasse2', 30);
+  await click('.auth-box button[type=submit]');
+  await page.waitForSelector('.error:has-text("attente")');
+  await cap('Si Léo essaie d\'entrer maintenant, la plateforme refuse. Personne d\'extérieur ne peut rejoindre l\'agence.', 3000, 'n13c');
+  await page.reload();
+  await page.waitForSelector('.auth-box');
+  await inject();
+  await type('input[name=email]', 'camille@ynov.com');
+  await type('input[name=password]', 'motdepasse1', 30);
+  await click('.auth-box button[type=submit]');
+  await page.waitForSelector('a.week-banner');
+  await cap('Camille, administratrice, voit la <b>demande en attente</b> sur son tableau de bord.', 3000, 'n13d');
+  await click('a.week-banner');
+  await page.waitForSelector('button:has-text("Accepter")');
+  await cap('Elle peut <b>accepter</b> ou <b>refuser</b> chaque demande.', 2500, 'n13e');
+  await click('button:has-text("Accepter")');
+  await page.waitForSelector('text=Aucune demande en attente');
+  await sleep(800);
+  await hideCap();
+  await click('button:has-text("Déconnexion")');
+  await page.waitForSelector('.auth-box');
+  await type('input[name=email]', 'leo@ynov.com');
+  await type('input[name=password]', 'motdepasse2', 30);
+  await click('.auth-box button[type=submit]');
   await page.waitForSelector('.week-banner');
   await sleep(500);
 

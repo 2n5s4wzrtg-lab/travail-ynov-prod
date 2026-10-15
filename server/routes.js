@@ -52,7 +52,8 @@ function timeOrNull(v, name = 'heure') {
 function idOrNull(v, table) {
   if (v == null || v === '') return null;
   const id = Number(v);
-  if (!Number.isInteger(id) || !db.prepare(`SELECT 1 FROM ${table} WHERE id = ?`).get(id)) throw bad('Référence inconnue.');
+  const extra = table === 'users' ? " AND status = 'approved'" : '';
+  if (!Number.isInteger(id) || !db.prepare(`SELECT 1 FROM ${table} WHERE id = ?${extra}`).get(id)) throw bad('Référence inconnue.');
   return id;
 }
 function email(v) {
@@ -107,7 +108,7 @@ function rateLimit(key, max = 10, windowMs = 15 * 60 * 1000) {
 }
 setInterval(() => { const n = Date.now(); for (const [k, v] of attempts) if (v.reset < n) attempts.delete(k); }, 600000).unref();
 
-const USER_PUBLIC = 'id, name, email, role, week_group, job, color, created_at';
+const USER_PUBLIC = 'id, name, email, role, week_group, job, color, status, created_at';
 
 // ---------- routes ----------
 const routes = [];
@@ -142,9 +143,11 @@ route('POST', '/api/auth/register', ({ body, ip, res, secure }) => {
   if (db.prepare('SELECT 1 FROM users WHERE email = ?').get(mail)) throw new HttpError(409, 'Un compte existe déjà avec cet e-mail.');
   const first = db.prepare('SELECT COUNT(*) c FROM users').get().c === 0;
   const color = COLORS[crypto.randomInt(COLORS.length)];
-  const info = db.prepare('INSERT INTO users (name, email, password_hash, role, week_group, job, color) VALUES (?,?,?,?,?,?,?)')
-    .run(name, mail, auth.hashPassword(pwd), first ? 'admin' : 'member', week, str(body.job, { max: 80 }), color);
+  // Le tout premier profil devient administrateur ; tous les suivants attendent la validation d'un admin.
+  const info = db.prepare('INSERT INTO users (name, email, password_hash, role, week_group, job, color, status) VALUES (?,?,?,?,?,?,?,?)')
+    .run(name, mail, auth.hashPassword(pwd), first ? 'admin' : 'member', week, str(body.job, { max: 80 }), color, first ? 'approved' : 'pending');
   const id = Number(info.lastInsertRowid);
+  if (!first) return { pending: true };
   log(null, id, 'a rejoint L’agence', name);
   const s = auth.createSession(id);
   res.setHeader('Set-Cookie', auth.cookieHeader(s.token, s.expires, secure));
@@ -158,6 +161,8 @@ route('POST', '/api/auth/login', ({ body, ip, res, secure }) => {
   // On exécute toujours un scrypt pour ne pas révéler si le compte existe.
   const ok = auth.verifyPassword(String(body.password || ''), u ? u.password_hash : 'scrypt$00$00');
   if (!u || !ok) throw new HttpError(401, 'E-mail ou mot de passe incorrect.');
+  if (u.status === 'pending') throw new HttpError(403, 'Ton inscription est en attente de validation par un administrateur de l’agence.');
+  if (u.status === 'rejected') throw new HttpError(403, 'Ton accès à la plateforme a été refusé. Contacte un administrateur de l’agence.');
   attempts.delete(`login:${ip}:${mail}`);
   const s = auth.createSession(u.id);
   res.setHeader('Set-Cookie', auth.cookieHeader(s.token, s.expires, secure));
@@ -192,7 +197,40 @@ route('POST', '/api/me/password', ({ user, body, req }) => {
 });
 
 // --- users ---
-route('GET', '/api/users', () => ({ users: db.prepare(`SELECT ${USER_PUBLIC} FROM users ORDER BY name COLLATE NOCASE`).all() }));
+route('GET', '/api/users', () => ({ users: db.prepare(`SELECT ${USER_PUBLIC} FROM users WHERE status = 'approved' ORDER BY name COLLATE NOCASE`).all() }));
+
+// --- validation des inscriptions (admin) ---
+route('GET', '/api/admin/users', ({ user }) => {
+  requireAdmin(user);
+  return { users: db.prepare(`SELECT ${USER_PUBLIC} FROM users ORDER BY (status = 'pending') DESC, name COLLATE NOCASE`).all() };
+});
+
+route('GET', '/api/admin/pending-count', ({ user }) => {
+  requireAdmin(user);
+  return { count: db.prepare("SELECT COUNT(*) c FROM users WHERE status = 'pending'").get().c };
+});
+
+route('POST', '/api/users/:id/approve', ({ user, params, body }) => {
+  requireAdmin(user);
+  const target = must(db.prepare('SELECT * FROM users WHERE id = ?').get(Number(params.id)), 'Membre');
+  if (target.status === 'approved') return { ok: true };
+  const role = oneOf(body.role, ['admin', 'member'], 'rôle', 'member');
+  db.prepare("UPDATE users SET status = 'approved', role = ? WHERE id = ?").run(role, target.id);
+  log(null, target.id, 'a rejoint L’agence', target.name);
+  return { ok: true };
+});
+
+// Refuse une demande, ou retire l'accès d'un membre (ses contributions restent, signées à son nom).
+route('POST', '/api/users/:id/reject', ({ user, params }) => {
+  requireAdmin(user);
+  const target = must(db.prepare('SELECT * FROM users WHERE id = ?').get(Number(params.id)), 'Membre');
+  if (target.id === user.id) throw bad('Vous ne pouvez pas vous retirer votre propre accès.');
+  if (target.role === 'admin' && target.status === 'approved') throw bad('Retirez d’abord le rôle administrateur de ce membre.');
+  db.prepare("UPDATE users SET status = 'rejected' WHERE id = ?").run(target.id);
+  db.prepare('DELETE FROM sessions WHERE user_id = ?').run(target.id);
+  if (target.status === 'approved') log(null, user.id, 'a retiré l’accès de', target.name);
+  return { ok: true };
+});
 
 route('PATCH', '/api/users/:id', ({ user, params, body }) => {
   requireAdmin(user);
@@ -256,7 +294,8 @@ route('GET', '/api/dashboard', ({ user }) => {
     overdue: db.prepare("SELECT COUNT(*) c FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.status != 'done' AND p.status != 'archive' AND t.due_date < ?").get(t).c,
     blocked: db.prepare("SELECT COUNT(*) c FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.status = 'blocked' AND p.status != 'archive'").get().c,
   };
-  return { currentWeek: weekGroupOf(t), today: t, myTasks, handoff, upcoming, activity, stats };
+  const pendingCount = isAdmin(user) ? db.prepare("SELECT COUNT(*) c FROM users WHERE status = 'pending'").get().c : 0;
+  return { currentWeek: weekGroupOf(t), today: t, myTasks, handoff, upcoming, activity, stats, pendingCount };
 });
 
 // --- projects ---

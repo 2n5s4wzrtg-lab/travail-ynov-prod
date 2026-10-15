@@ -49,8 +49,8 @@ function userFromRequest(req) {
   const token = sessionToken(req);
   if (!token) return null;
   const row = db.prepare(`
-    SELECT u.id, u.name, u.email, u.role, u.week_group, u.job, u.color, s.expires_at
-    FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?`).get(sha(token));
+    SELECT u.id, u.name, u.email, u.role, u.week_group, u.job, u.color, u.status, s.expires_at
+    FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND u.status = 'approved'`).get(sha(token));
   if (!row) return null;
   if (row.expires_at < Date.now()) { destroySession(token); return null; }
   delete row.expires_at;

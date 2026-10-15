@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS users (
   week_group    TEXT NOT NULL DEFAULT 'B' CHECK (week_group IN ('B','C')),
   job           TEXT NOT NULL DEFAULT '',
   color         TEXT NOT NULL DEFAULT '#ff2d7a',
+  status        TEXT NOT NULL DEFAULT 'approved' CHECK (status IN ('pending','approved','rejected')),
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -128,6 +129,12 @@ CREATE INDEX IF NOT EXISTS idx_docs_project ON documents(project_id);
 CREATE INDEX IF NOT EXISTS idx_events_date ON events(date);
 CREATE INDEX IF NOT EXISTS idx_activity_project ON activity(project_id, id);
 `);
+
+// Migration : les bases créées avant la validation des inscriptions n'ont pas de colonne status.
+// Les comptes existants restent approuvés.
+if (!db.prepare('PRAGMA table_info(users)').all().some((c) => c.name === 'status')) {
+  db.exec("ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'approved'");
+}
 
 // Réglage : parité des semaines ISO qui correspondent à la semaine B.
 db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('week_b_parity', '0')").run();

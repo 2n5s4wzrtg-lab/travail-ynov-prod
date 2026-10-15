@@ -37,13 +37,62 @@ const alice = new Client();
 const bob = new Client();
 let projectId;
 
-test('le premier inscrit devient admin, le suivant membre', async () => {
+test('le premier inscrit devient admin ; les suivants attendent la validation', async () => {
   const a = await alice.call('POST', '/api/auth/register', { name: 'Alice', email: 'alice@ynov.com', password: 'motdepasse1', week_group: 'B' });
   assert.equal(a.status, 200);
   assert.equal(a.data.user.role, 'admin');
+  assert.equal(a.data.user.status, 'approved');
+
+  // Bob s'inscrit : aucune session, aucun accès.
   const b = await bob.call('POST', '/api/auth/register', { name: 'Bob', email: 'bob@ynov.com', password: 'motdepasse2', week_group: 'C' });
-  assert.equal(b.data.user.role, 'member');
-  assert.equal(b.data.user.week_group, 'C');
+  assert.equal(b.status, 200);
+  assert.equal(b.data.pending, true);
+  assert.equal(b.data.user, undefined);
+  assert.equal(bob.cookie, '');
+  assert.equal((await bob.call('GET', '/api/projects')).status, 401);
+  const early = await bob.call('POST', '/api/auth/login', { email: 'bob@ynov.com', password: 'motdepasse2' });
+  assert.equal(early.status, 403);
+  assert.match(early.data.error, /attente/);
+  assert.equal(bob.cookie, '');
+  // Un mauvais mot de passe ne révèle pas le statut du compte.
+  assert.equal((await bob.call('POST', '/api/auth/login', { email: 'bob@ynov.com', password: 'faux-faux-faux' })).status, 401);
+
+  // Bob n'apparaît pas dans l'annuaire ni dans les assignations.
+  assert.equal((await alice.call('GET', '/api/users')).data.users.length, 1);
+  const pending = await alice.call('GET', '/api/admin/pending-count');
+  assert.equal(pending.data.count, 1);
+});
+
+test('seul un admin voit et traite les demandes', async () => {
+  const all = (await alice.call('GET', '/api/admin/users')).data.users;
+  const bobRow = all.find((u) => u.email === 'bob@ynov.com');
+  assert.equal(bobRow.status, 'pending');
+  assert.equal((await bob.call('GET', '/api/admin/users')).status, 401);
+  assert.equal((await bob.call('POST', `/api/users/${bobRow.id}/approve`)).status, 401);
+
+  // Refus : le compte reste bloqué.
+  assert.equal((await alice.call('POST', `/api/users/${bobRow.id}/reject`)).status, 200);
+  const refused = await bob.call('POST', '/api/auth/login', { email: 'bob@ynov.com', password: 'motdepasse2' });
+  assert.equal(refused.status, 403);
+  assert.match(refused.data.error, /refusé/);
+
+  // Acceptation : Bob peut se connecter.
+  assert.equal((await alice.call('POST', `/api/users/${bobRow.id}/approve`)).status, 200);
+  const ok = await bob.call('POST', '/api/auth/login', { email: 'bob@ynov.com', password: 'motdepasse2' });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.data.user.role, 'member');
+  assert.equal(ok.data.user.week_group, 'C');
+  assert.equal((await bob.call('GET', '/api/projects')).status, 200);
+  assert.equal((await alice.call('GET', '/api/users')).data.users.length, 2);
+
+  // Retirer l'accès coupe aussi la session déjà ouverte, puis on rétablit.
+  assert.equal((await alice.call('POST', `/api/users/${bobRow.id}/reject`)).status, 200);
+  assert.equal((await bob.call('GET', '/api/projects')).status, 401);
+  assert.equal((await alice.call('POST', `/api/users/${bobRow.id}/approve`)).status, 200);
+  assert.equal((await bob.call('POST', '/api/auth/login', { email: 'bob@ynov.com', password: 'motdepasse2' })).status, 200);
+
+  // On ne peut pas se retirer soi-même l'accès.
+  assert.equal((await alice.call('POST', '/api/users/1/reject')).status, 400);
 });
 
 test('refuse les doublons, mots de passe courts et mauvais identifiants', async () => {
